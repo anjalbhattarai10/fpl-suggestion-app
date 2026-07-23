@@ -182,9 +182,56 @@ def bootstrap_frames() -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, Season
     players["total_points"] = _safe_numeric(players.get("total_points", pd.Series(index=players.index)))
     players["season_minutes"] = _safe_numeric(players.get("minutes", pd.Series(index=players.index)))
     players["form_api"] = _safe_numeric(players.get("form", pd.Series(index=players.index)))
-    players["selected_by_percent"] = _safe_numeric(players.get("selected_by_percent", pd.Series(index=players.index)))
-    players["transfers_in_event"] = _safe_numeric(players.get("transfers_in_event", pd.Series(index=players.index)))
-    players["transfers_out_event"] = _safe_numeric(players.get("transfers_out_event", pd.Series(index=players.index)))
+    players["selected_by_percent"] = _safe_numeric(
+        players.get("selected_by_percent", pd.Series(index=players.index))
+    )
+    players["transfers_in_event"] = _safe_numeric(
+        players.get("transfers_in_event", pd.Series(index=players.index))
+    )
+    players["transfers_out_event"] = _safe_numeric(
+        players.get("transfers_out_event", pd.Series(index=players.index))
+    )
+    players["transfers_in"] = _safe_numeric(
+        players.get("transfers_in", pd.Series(index=players.index))
+    )
+    players["transfers_out"] = _safe_numeric(
+        players.get("transfers_out", pd.Series(index=players.index))
+    )
+    players["net_transfers_event"] = (
+        players["transfers_in_event"] - players["transfers_out_event"]
+    )
+    players["net_transfers_season"] = (
+        players["transfers_in"] - players["transfers_out"]
+    )
+
+    players["ownership_label"] = pd.cut(
+        players["selected_by_percent"],
+        bins=[-0.01, 5, 10, 25, 40, float("inf")],
+        labels=[
+            "Ultra differential",
+            "Differential",
+            "Moderately owned",
+            "Popular pick",
+            "Highly owned",
+        ],
+        include_lowest=True,
+        right=False,
+    ).astype(str)
+
+    players["transfer_trend"] = players["net_transfers_event"].apply(
+        lambda value: (
+            "Rapidly rising"
+            if value >= 100_000
+            else "Rising"
+            if value > 0
+            else "Rapidly falling"
+            if value <= -100_000
+            else "Falling"
+            if value < 0
+            else "Stable"
+        )
+    )
+
     players["cost_change_event"] = _safe_numeric(players.get("cost_change_event", pd.Series(index=players.index))) / 10.0
     players["cost_change_start"] = _safe_numeric(players.get("cost_change_start", pd.Series(index=players.index))) / 10.0
     players["chance"] = _safe_numeric(
