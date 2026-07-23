@@ -8,7 +8,7 @@ from typing import Dict, List, Tuple
 import pandas as pd
 import streamlit as st
 
-from explanations import recommendation_tag, why_player
+from explanations import ai_scout_explanation, recommendation_tag, why_player
 from fpl_data import (
     FPLDataError,
     attach_secondary_injuries,
@@ -21,6 +21,13 @@ from fpl_data import (
     upcoming_fixture_features,
 )
 from scoring import DEFAULT_WEIGHTS, build_scores
+from ai_engine import (
+    captain_picks,
+    differential_picks,
+    fixture_swing_picks,
+    price_watch,
+    scout_verdict,
+)
 
 
 st.set_page_config(
@@ -841,6 +848,52 @@ st.markdown(
         .transfer-summary-grid {
             grid-template-columns: repeat(2, minmax(0, 1fr));
         }
+    }
+
+
+    .ai-verdict-card {
+        padding: 1.15rem;
+        border: 1px solid rgba(55, 0, 60, 0.10);
+        border-radius: 18px;
+        background: linear-gradient(145deg, #ffffff, #f4fff9);
+        box-shadow: 0 10px 26px rgba(25, 20, 45, 0.06);
+    }
+
+    .ai-action {
+        display: inline-block;
+        padding: 0.3rem 0.65rem;
+        border-radius: 999px;
+        color: #37003c;
+        background: #00ff87;
+        font-size: 0.76rem;
+        font-weight: 900;
+    }
+
+    .ai-score-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 0.65rem;
+        margin-top: 0.9rem;
+    }
+
+    .ai-mini-score {
+        padding: 0.65rem;
+        border-radius: 12px;
+        background: #f2eff4;
+    }
+
+    .ai-mini-score .label {
+        color: #766c7b;
+        font-size: 0.65rem;
+        font-weight: 800;
+        text-transform: uppercase;
+    }
+
+    .ai-mini-score .value {
+        margin-top: 0.2rem;
+        color: #2a1731;
+        font-size: 1.05rem;
+        font-weight: 900;
     }
 
     .indicator-section {
@@ -1990,11 +2043,12 @@ m4.metric(
 )
 
 
-rank_tab, compare_tab, transfer_tab, detail_tab, methodology_tab = st.tabs(
+rank_tab, compare_tab, transfer_tab, ai_tab, detail_tab, methodology_tab = st.tabs(
     [
         "Player rankings",
         "Compare players",
         "Transfer planner",
+        "AI Center",
         "Player detail",
         "Methodology & data health",
     ]
@@ -2761,6 +2815,344 @@ with transfer_tab:
         "Projected model gain is not the same as guaranteed FPL points."
     )
 
+
+
+
+with ai_tab:
+    st.markdown(
+        """
+        <div class="section-heading">
+            <h2>Phase 3 AI Center</h2>
+            <p>
+                Explainable recommendations for captaincy, differentials,
+                price momentum and fixture swings. These insights are generated
+                from official FPL data and the model scores already used by the app.
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    scout_tab, captain_tab, differential_tab, price_tab, swing_tab = st.tabs(
+        [
+            "AI Scout",
+            "Captain picks",
+            "Differential finder",
+            "Price watch",
+            "Fixture swings",
+        ]
+    )
+
+    with scout_tab:
+        st.markdown("### AI Scout verdict")
+
+        scout_names = (
+            scored.sort_values("suggestion_score", ascending=False)["web_name"]
+            .dropna()
+            .astype(str)
+            .tolist()
+        )
+        scout_name = st.selectbox(
+            "Choose a player for an AI verdict",
+            scout_names,
+            key="ai_scout_player",
+        )
+        scout_player = scored[scored["web_name"] == scout_name].iloc[0]
+        verdict = scout_verdict(scout_player)
+
+        render_html(
+            f"""
+            <div class="ai-verdict-card">
+                <span class="ai-action">{html.escape(verdict.action)}</span>
+                <h3 style="margin:.7rem 0 .25rem;">
+                    {html.escape(verdict.headline)}
+                </h3>
+                <p>{html.escape(verdict.summary)}</p>
+
+                <div class="ai-score-grid">
+                    <div class="ai-mini-score">
+                        <div class="label">AI confidence</div>
+                        <div class="value">{verdict.confidence:.0f}%</div>
+                    </div>
+                    <div class="ai-mini-score">
+                        <div class="label">Overall score</div>
+                        <div class="value">{float(scout_player.get('suggestion_score', 0)):.1f}/100</div>
+                    </div>
+                    <div class="ai-mini-score">
+                        <div class="label">Risk</div>
+                        <div class="value">{float(scout_player.get('risk_score', 0)):.0f}/100</div>
+                    </div>
+                </div>
+
+                <div class="pros-cons">
+                    <div class="pros">
+                        <strong>Model strengths</strong><br>
+                        {'<br>'.join('✓ ' + html.escape(item) for item in verdict.strengths)}
+                    </div>
+                    <div class="cons">
+                        <strong>Risks to monitor</strong><br>
+                        {'<br>'.join('• ' + html.escape(item) for item in verdict.risks)}
+                    </div>
+                </div>
+            </div>
+            """
+        )
+        st.caption(ai_scout_explanation(scout_player))
+
+    with captain_tab:
+        st.markdown("### Recommended captain options")
+        st.caption(
+            "Captain score emphasizes form, fixtures, secure minutes, team impact "
+            "and availability. It is a 0–100 model indicator."
+        )
+
+        captain_limit = st.slider(
+            "Number of captain choices",
+            3,
+            10,
+            5,
+            key="captain_limit",
+        )
+        captains = captain_picks(scored, captain_limit)
+
+        captain_display = captains[
+            [
+                "web_name",
+                "team_short",
+                "position",
+                "price",
+                "captain_score",
+                "form_score",
+                "fixtures_score",
+                "minutes_score",
+                "availability_score",
+                "selected_by_percent",
+                "next_opponents",
+            ]
+        ].rename(
+            columns={
+                "web_name": "Player",
+                "team_short": "Team",
+                "position": "Pos",
+                "price": "Price",
+                "captain_score": "Captain score",
+                "form_score": "Form",
+                "fixtures_score": "Fixtures",
+                "minutes_score": "Minutes",
+                "availability_score": "Availability",
+                "selected_by_percent": "Ownership %",
+                "next_opponents": "Next fixtures",
+            }
+        )
+
+        st.dataframe(
+            captain_display,
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "Price": st.column_config.NumberColumn(format="£%.1fm"),
+                "Captain score": st.column_config.ProgressColumn(
+                    min_value=0, max_value=100, format="%.1f"
+                ),
+                "Form": st.column_config.ProgressColumn(
+                    min_value=0, max_value=100, format="%.1f"
+                ),
+                "Fixtures": st.column_config.ProgressColumn(
+                    min_value=0, max_value=100, format="%.1f"
+                ),
+                "Minutes": st.column_config.ProgressColumn(
+                    min_value=0, max_value=100, format="%.1f"
+                ),
+                "Availability": st.column_config.ProgressColumn(
+                    min_value=0, max_value=100, format="%.1f"
+                ),
+                "Ownership %": st.column_config.NumberColumn(format="%.1f%%"),
+            },
+        )
+
+    with differential_tab:
+        st.markdown("### Differential finder")
+        ownership_limit = st.slider(
+            "Maximum ownership",
+            1.0,
+            20.0,
+            10.0,
+            0.5,
+            key="differential_ownership",
+        )
+        differential_limit = st.slider(
+            "Number of players",
+            5,
+            20,
+            10,
+            key="differential_limit",
+        )
+
+        differentials = differential_picks(
+            scored,
+            ownership_limit=ownership_limit,
+            limit=differential_limit,
+        )
+
+        differential_display = differentials[
+            [
+                "web_name",
+                "team_short",
+                "position",
+                "price",
+                "selected_by_percent",
+                "differential_score",
+                "suggestion_score",
+                "form_score",
+                "fixtures_score",
+                "net_transfers_event",
+                "next_opponents",
+            ]
+        ].rename(
+            columns={
+                "web_name": "Player",
+                "team_short": "Team",
+                "position": "Pos",
+                "price": "Price",
+                "selected_by_percent": "Ownership %",
+                "differential_score": "Differential score",
+                "suggestion_score": "Overall score",
+                "form_score": "Form",
+                "fixtures_score": "Fixtures",
+                "net_transfers_event": "Net transfers",
+                "next_opponents": "Next fixtures",
+            }
+        )
+
+        st.dataframe(
+            differential_display,
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "Price": st.column_config.NumberColumn(format="£%.1fm"),
+                "Ownership %": st.column_config.NumberColumn(format="%.1f%%"),
+                "Differential score": st.column_config.ProgressColumn(
+                    min_value=0, max_value=100, format="%.1f"
+                ),
+                "Overall score": st.column_config.ProgressColumn(
+                    min_value=0, max_value=100, format="%.1f"
+                ),
+                "Form": st.column_config.ProgressColumn(
+                    min_value=0, max_value=100, format="%.1f"
+                ),
+                "Fixtures": st.column_config.ProgressColumn(
+                    min_value=0, max_value=100, format="%.1f"
+                ),
+                "Net transfers": st.column_config.NumberColumn(format="%+d"),
+            },
+        )
+
+    with price_tab:
+        st.markdown("### Price-rise pressure watch")
+        st.caption(
+            "This is an estimated pressure indicator based on relative transfer "
+            "momentum, form and value. It is not an official price-change prediction."
+        )
+
+        rising = price_watch(scored, 12)
+        price_display = rising[
+            [
+                "web_name",
+                "team_short",
+                "price",
+                "price_momentum_score",
+                "transfers_in_event",
+                "transfers_out_event",
+                "net_transfers_event",
+                "selected_by_percent",
+                "form_score",
+            ]
+        ].rename(
+            columns={
+                "web_name": "Player",
+                "team_short": "Team",
+                "price": "Price",
+                "price_momentum_score": "Momentum score",
+                "transfers_in_event": "Transfers in",
+                "transfers_out_event": "Transfers out",
+                "net_transfers_event": "Net transfers",
+                "selected_by_percent": "Ownership %",
+                "form_score": "Form",
+            }
+        )
+        st.dataframe(
+            price_display,
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "Price": st.column_config.NumberColumn(format="£%.1fm"),
+                "Momentum score": st.column_config.ProgressColumn(
+                    min_value=0, max_value=100, format="%.1f"
+                ),
+                "Net transfers": st.column_config.NumberColumn(format="%+d"),
+                "Ownership %": st.column_config.NumberColumn(format="%.1f%%"),
+                "Form": st.column_config.ProgressColumn(
+                    min_value=0, max_value=100, format="%.1f"
+                ),
+            },
+        )
+
+    with swing_tab:
+        st.markdown("### Fixture swing analyzer")
+        st.caption(
+            "Highlights players whose upcoming schedule, team strength and "
+            "current form create an attractive near-term opportunity."
+        )
+
+        swing = fixture_swing_picks(scored, 15)
+        swing_display = swing[
+            [
+                "web_name",
+                "team_short",
+                "position",
+                "price",
+                "fixture_swing_score",
+                "fixtures_score",
+                "avg_fdr",
+                "form_score",
+                "team_impact_score",
+                "next_opponents",
+            ]
+        ].rename(
+            columns={
+                "web_name": "Player",
+                "team_short": "Team",
+                "position": "Pos",
+                "price": "Price",
+                "fixture_swing_score": "Swing score",
+                "fixtures_score": "Fixtures",
+                "avg_fdr": "Avg FDR",
+                "form_score": "Form",
+                "team_impact_score": "Team impact",
+                "next_opponents": "Next fixtures",
+            }
+        )
+        st.dataframe(
+            swing_display,
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "Price": st.column_config.NumberColumn(format="£%.1fm"),
+                "Swing score": st.column_config.ProgressColumn(
+                    min_value=0, max_value=100, format="%.1f"
+                ),
+                "Fixtures": st.column_config.ProgressColumn(
+                    min_value=0, max_value=100, format="%.1f"
+                ),
+                "Avg FDR": st.column_config.NumberColumn(format="%.2f"),
+                "Form": st.column_config.ProgressColumn(
+                    min_value=0, max_value=100, format="%.1f"
+                ),
+                "Team impact": st.column_config.ProgressColumn(
+                    min_value=0, max_value=100, format="%.1f"
+                ),
+            },
+        )
 
 
 with detail_tab:
