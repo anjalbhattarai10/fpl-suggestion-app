@@ -135,8 +135,50 @@ def bootstrap_frames() -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, Season
     players["web_name"] = players.get("web_name", players["player_name"])
     players["team_name"] = players["team"].map(team_names).fillna("Unknown")
     players["team_short"] = players["team"].map(team_short).fillna("UNK")
-    players["position"] = players["element_type"].map(position_names).fillna("UNK")
-    players["price"] = _safe_numeric(players.get("now_cost", pd.Series(index=players.index))) / 10.0
+    players["position"] = players["element_type"].map(position_names).fillna("UNK").replace({"GKP": "GK"})
+
+    # Get the Premier League team code from the FPL teams data.
+    # This code is used to build each club badge URL.
+    team_codes = (
+        teams.set_index("id")["code"].to_dict()
+        if not teams.empty and "code" in teams.columns
+        else {}
+    )
+
+    players["team_code"] = players["team"].map(team_codes)
+
+    # Build a public Premier League club badge URL.
+    players["team_logo"] = players["team_code"].apply(
+        lambda code: (
+            "https://resources.premierleague.com/"
+            f"premierleague/badges/70/t{int(code)}.png"
+            if pd.notna(code)
+            else ""
+        )
+    )
+
+    # Build a public Premier League player photo URL.
+    # The FPL API usually provides a photo value such as "123456.jpg".
+    players["player_photo"] = players.get(
+        "photo",
+        pd.Series("", index=players.index),
+    ).fillna("").astype(str).apply(
+        lambda photo: (
+            "https://resources.premierleague.com/"
+            "premierleague/photos/players/110x140/"
+            f"p{photo.rsplit('.', 1)[0]}.png"
+            if photo and photo.rsplit(".", 1)[0].isdigit()
+            else ""
+        )
+    )
+
+    players["price"] = _safe_numeric(
+        players.get(
+            "now_cost",
+            pd.Series(index=players.index),
+        )
+    ) / 10.0
+
     players["total_points"] = _safe_numeric(players.get("total_points", pd.Series(index=players.index)))
     players["season_minutes"] = _safe_numeric(players.get("minutes", pd.Series(index=players.index)))
     players["form_api"] = _safe_numeric(players.get("form", pd.Series(index=players.index)))
