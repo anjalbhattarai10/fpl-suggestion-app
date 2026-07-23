@@ -5,6 +5,8 @@ from typing import Dict
 import numpy as np
 import pandas as pd
 
+from ai_engine import add_phase3_scores
+
 DEFAULT_WEIGHTS = {
     "form": 30.0,
     "fixtures": 20.0,
@@ -114,4 +116,5 @@ def build_scores(players: pd.DataFrame, weights: Dict[str, float], lookback: int
         + normalized["team_impact"] * df["team_impact_score"]
     ).clip(0, 100)
 
+    df = add_phase3_scores(df)
     return df.sort_values(["suggestion_score", "total_points"], ascending=[False, False]).reset_index(drop=True)

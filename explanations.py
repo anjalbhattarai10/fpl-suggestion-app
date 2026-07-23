@@ -4,6 +4,8 @@ from typing import List
 
 import pandas as pd
 
+from ai_engine import scout_verdict
+
 
 def _num(row: pd.Series, column: str, default: float = 0.0) -> float:
     value = row.get(column, default)
@@ -172,3 +174,20 @@ def why_player(row: pd.Series) -> str:
         explanation += f" Next: {opponents}."
 
     return explanation
+
+
+
+def ai_scout_explanation(row: pd.Series) -> str:
+    """
+    Convert the structured AI Scout verdict into a concise display sentence.
+
+    Keeping this formatter in explanations.py preserves the existing separation:
+    ai_engine.py decides, while explanations.py turns decisions into text.
+    """
+    verdict = scout_verdict(row)
+    strengths = "; ".join(verdict.strengths)
+    risks = "; ".join(verdict.risks)
+    return (
+        f"{verdict.headline}. {verdict.summary} "
+        f"Strengths: {strengths}. Risks: {risks}."
+    )
