@@ -21,6 +21,22 @@ from fpl_data import (
     upcoming_fixture_features,
 )
 from scoring import DEFAULT_WEIGHTS, build_scores
+from squad_engine import (
+    analyze_budget,
+    chip_readiness,
+    choose_captains,
+    fixture_matrix,
+    rate_squad,
+    select_best_starting_xi,
+    validate_squad,
+)
+from optimizer import build_wildcard_squad, optimize_two_transfers
+from phase4_explanations import (
+    budget_warnings,
+    squad_summary,
+    starting_xi_summary,
+    wildcard_summary,
+)
 from ai_engine import (
     captain_picks,
     differential_picks,
@@ -1260,6 +1276,363 @@ st.markdown(
             border-radius: 18px;
         }
     }
+
+    /* ===================== PHASE 4 FOOTBALL UI ===================== */
+
+    .stApp {
+        background:
+            radial-gradient(circle at 12% 8%, rgba(0, 255, 135, 0.14), transparent 18%),
+            radial-gradient(circle at 90% 2%, rgba(120, 250, 180, 0.12), transparent 22%),
+            repeating-linear-gradient(
+                90deg,
+                rgba(15, 117, 64, 0.025) 0,
+                rgba(15, 117, 64, 0.025) 90px,
+                rgba(255, 255, 255, 0.01) 90px,
+                rgba(255, 255, 255, 0.01) 180px
+            ),
+            linear-gradient(180deg, #f7faf8 0%, #edf3ef 100%) !important;
+    }
+
+    .hero {
+        min-height: 210px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        background:
+            linear-gradient(rgba(14, 25, 22, 0.28), rgba(14, 25, 22, 0.35)),
+            repeating-linear-gradient(
+                90deg,
+                #0c7a44 0,
+                #0c7a44 90px,
+                #08713d 90px,
+                #08713d 180px
+            ) !important;
+        border: 1px solid rgba(255,255,255,.24);
+        box-shadow: 0 22px 55px rgba(6, 68, 37, 0.25) !important;
+    }
+
+    .hero::before {
+        content: "";
+        position: absolute;
+        inset: 18px;
+        border: 2px solid rgba(255,255,255,.34);
+        border-radius: 16px;
+        pointer-events: none;
+    }
+
+    .team-center-banner {
+        padding: 1.35rem 1.5rem;
+        margin: 0.5rem 0 1rem;
+        border-radius: 20px;
+        color: #ffffff;
+        background: linear-gradient(115deg, #102f22, #0b6f40 65%, #00a85a);
+        box-shadow: 0 16px 38px rgba(5, 82, 45, .18);
+    }
+
+    .team-center-banner h2 {
+        margin: 0;
+        color: #ffffff;
+    }
+
+    .team-center-banner p {
+        margin: .45rem 0 0;
+        color: rgba(255,255,255,.82);
+    }
+
+    .pitch {
+        position: relative;
+        min-height: 650px;
+        padding: 2rem 1rem;
+        overflow: hidden;
+        border: 5px solid #f7fff9;
+        border-radius: 24px;
+        background:
+            repeating-linear-gradient(
+                90deg,
+                #0b854b 0,
+                #0b854b 100px,
+                #087744 100px,
+                #087744 200px
+            );
+        box-shadow:
+            inset 0 0 0 2px rgba(255,255,255,.60),
+            0 18px 42px rgba(5, 78, 42, .20);
+    }
+
+    .pitch::before {
+        content: "";
+        position: absolute;
+        left: 50%;
+        top: 0;
+        bottom: 0;
+        width: 2px;
+        background: rgba(255,255,255,.55);
+    }
+
+    .pitch::after {
+        content: "";
+        position: absolute;
+        left: calc(50% - 72px);
+        top: calc(50% - 72px);
+        width: 144px;
+        height: 144px;
+        border: 2px solid rgba(255,255,255,.55);
+        border-radius: 50%;
+    }
+
+    .pitch-row {
+        position: relative;
+        z-index: 2;
+        display: flex;
+        justify-content: center;
+        flex-wrap: wrap;
+        gap: 1rem;
+        margin: 1.15rem 0;
+    }
+
+    .pitch-player {
+        width: 126px;
+        padding: .72rem .55rem;
+        border: 1px solid rgba(255,255,255,.42);
+        border-radius: 16px;
+        text-align: center;
+        color: #ffffff;
+        background: rgba(18, 0, 31, .82);
+        box-shadow: 0 10px 24px rgba(0,0,0,.18);
+    }
+
+    .pitch-player img {
+        width: 58px;
+        height: 68px;
+        object-fit: contain;
+        margin-bottom: .25rem;
+    }
+
+    .pitch-player .name {
+        font-size: .78rem;
+        font-weight: 900;
+    }
+
+    .pitch-player .meta {
+        margin-top: .15rem;
+        color: #bfffd8;
+        font-size: .66rem;
+    }
+
+    .squad-score-grid,
+    .chip-grid,
+    .bench-strip {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: .8rem;
+        margin: 1rem 0 1.15rem;
+    }
+
+    .squad-score-card,
+    .chip-card,
+    .bench-card {
+        padding: 1rem;
+        border: 1px solid rgba(20, 100, 60, .12);
+        border-radius: 17px;
+        background: rgba(255,255,255,.95);
+        box-shadow: 0 10px 28px rgba(20, 70, 45, .07);
+    }
+
+    .squad-score-card .label,
+    .chip-card .label {
+        color: #6c7570;
+        font-size: .68rem;
+        font-weight: 850;
+        letter-spacing: .06em;
+        text-transform: uppercase;
+    }
+
+    .squad-score-card .value,
+    .chip-card .value {
+        margin-top: .25rem;
+        color: #0b6f40;
+        font-size: 1.45rem;
+        font-weight: 900;
+    }
+
+    .squad-score-card .bar {
+        height: 7px;
+        margin-top: .65rem;
+        overflow: hidden;
+        border-radius: 999px;
+        background: #e4ece7;
+    }
+
+    .squad-score-card .fill {
+        height: 100%;
+        border-radius: 999px;
+        background: linear-gradient(90deg, #00b864, #00ff87);
+    }
+
+    .team-note {
+        padding: .95rem 1rem;
+        margin: .75rem 0;
+        border-left: 5px solid #00b864;
+        border-radius: 14px;
+        background: #ffffff;
+        line-height: 1.5;
+    }
+
+    @media (max-width: 1000px) {
+        .squad-score-grid,
+        .chip-grid,
+        .bench-strip {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+    }
+
+    @media (max-width: 650px) {
+        .squad-score-grid,
+        .chip-grid,
+        .bench-strip {
+            grid-template-columns: 1fr;
+        }
+    }
+
+
+    /* ===================== AI HELP CENTER ===================== */
+
+    .help-center-banner {
+        position: relative;
+        overflow: hidden;
+        padding: 1.35rem 1.5rem;
+        margin: .45rem 0 1rem;
+        border-radius: 20px;
+        color: #ffffff;
+        background:
+            radial-gradient(circle at 90% 20%, rgba(0,255,135,.22), transparent 25%),
+            linear-gradient(120deg, #25002d, #4a0052 58%, #09663d);
+        box-shadow: 0 16px 38px rgba(55,0,60,.18);
+    }
+
+    .help-center-banner h2 {
+        margin: 0;
+        color: #ffffff;
+    }
+
+    .help-center-banner p {
+        margin: .45rem 0 0;
+        color: rgba(255,255,255,.82);
+    }
+
+    .help-player-card {
+        display: grid;
+        grid-template-columns: 150px minmax(0, 1fr);
+        gap: 1.1rem;
+        align-items: center;
+        padding: 1.15rem;
+        margin: .8rem 0 1rem;
+        border: 1px solid rgba(55,0,60,.10);
+        border-radius: 20px;
+        background: linear-gradient(145deg, #ffffff, #f4fff8);
+        box-shadow: 0 12px 30px rgba(25,20,45,.08);
+    }
+
+    .help-player-photo {
+        width: 140px;
+        height: 165px;
+        object-fit: contain;
+        object-position: bottom;
+        border-radius: 18px;
+        background:
+            radial-gradient(circle at 50% 80%, rgba(0,255,135,.22), transparent 45%),
+            linear-gradient(145deg, #eee8f1, #e8fff2);
+    }
+
+    .help-player-placeholder {
+        width: 140px;
+        height: 165px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 18px;
+        background: linear-gradient(145deg, #eee8f1, #e8fff2);
+        font-size: 3rem;
+    }
+
+    .help-player-name {
+        color: #24152c;
+        font-size: 1.8rem;
+        font-weight: 900;
+        line-height: 1.1;
+    }
+
+    .help-player-meta {
+        margin-top: .35rem;
+        color: #746a79;
+        font-size: .9rem;
+    }
+
+    .help-stat-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: .65rem;
+        margin-top: .9rem;
+    }
+
+    .help-stat {
+        padding: .65rem;
+        border-radius: 12px;
+        background: #f1edf3;
+    }
+
+    .help-stat .k {
+        color: #756a7b;
+        font-size: .63rem;
+        font-weight: 850;
+        text-transform: uppercase;
+    }
+
+    .help-stat .v {
+        margin-top: .18rem;
+        color: #2a1731;
+        font-size: 1rem;
+        font-weight: 900;
+    }
+
+    .help-analysis-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: .75rem;
+        margin: 1rem 0;
+    }
+
+    .help-analysis-card {
+        padding: .9rem;
+        border: 1px solid rgba(55,0,60,.08);
+        border-radius: 15px;
+        background: #ffffff;
+    }
+
+    .help-analysis-card strong {
+        display: block;
+        margin-bottom: .3rem;
+        color: #0b6f40;
+    }
+
+    .help-analysis-card p {
+        margin: 0;
+        color: #6d6472;
+        font-size: .79rem;
+        line-height: 1.45;
+    }
+
+    @media (max-width: 850px) {
+        .help-player-card {
+            grid-template-columns: 1fr;
+        }
+
+        .help-stat-grid,
+        .help-analysis-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+    }
+
     </style>
     """,
     unsafe_allow_html=True,
@@ -1849,6 +2222,141 @@ def transfer_suggestions(
     )
 
 
+
+# ==================== PHASE 4 GUI HELPERS ====================
+
+def player_selector_labels(frame: pd.DataFrame) -> Dict[str, int]:
+    """Build readable, unique labels for the 15-player squad selector."""
+    labels: Dict[str, int] = {}
+    for _, row in frame.sort_values(
+        ["position", "suggestion_score"],
+        ascending=[True, False],
+    ).iterrows():
+        label = (
+            f"{row.get('web_name', 'Unknown')} · "
+            f"{row.get('team_short', '')} · "
+            f"{row.get('position', '')} · "
+            f"£{float(row.get('price', 0)):.1f}m"
+        )
+        labels[label] = int(row["player_id"])
+    return labels
+
+
+def render_squad_score_cards(ratings: object) -> None:
+    """Render eight squad ratings as football-green progress cards."""
+    metrics = [
+        ("Overall", float(ratings.overall)),
+        ("Starting XI", float(ratings.starting_xi)),
+        ("Bench", float(ratings.bench)),
+        ("Captaincy", float(ratings.captaincy)),
+        ("Fixtures", float(ratings.fixtures)),
+        ("Availability", float(ratings.availability)),
+        ("Value", float(ratings.value)),
+        ("Risk", float(ratings.risk)),
+    ]
+
+    cards = []
+    for label, value in metrics:
+        bar_value = 100.0 - value if label == "Risk" else value
+        cards.append(
+            f"""
+            <div class="squad-score-card">
+                <div class="label">{html.escape(label)}</div>
+                <div class="value">{value:.1f}</div>
+                <div class="bar">
+                    <div class="fill" style="width:{max(0, min(100, bar_value)):.1f}%"></div>
+                </div>
+            </div>
+            """
+        )
+
+    render_html('<div class="squad-score-grid">' + "".join(cards) + "</div>")
+
+
+def render_pitch(starting_xi: pd.DataFrame, formation: str) -> None:
+    """Place the recommended XI on a CSS football pitch."""
+    if starting_xi.empty:
+        st.info("A legal starting XI is not available.")
+        return
+
+    rows = []
+    for position in ["FWD", "MID", "DEF", "GK"]:
+        player_cards = []
+        for _, player_row in starting_xi[starting_xi["position"] == position].iterrows():
+            photo = safe_image_url(player_row.get("player_photo"))
+            image = (
+                f'<img src="{html.escape(photo)}" alt="">'
+                if photo
+                else '<div style="font-size:2rem;">👤</div>'
+            )
+            player_cards.append(
+                f"""
+                <div class="pitch-player">
+                    {image}
+                    <div class="name">{html.escape(str(player_row.get('web_name', 'Unknown')))}</div>
+                    <div class="meta">
+                        {html.escape(str(player_row.get('team_short', '')))}
+                        · {float(player_row.get('suggestion_score', 0)):.1f}
+                    </div>
+                </div>
+                """
+            )
+        rows.append('<div class="pitch-row">' + "".join(player_cards) + "</div>")
+
+    render_html(
+        f"""
+        <div style="margin:.4rem 0 .8rem;font-weight:850;color:#0b6f40;">
+            Recommended formation: {html.escape(formation)}
+        </div>
+        <div class="pitch">{''.join(rows)}</div>
+        """
+    )
+
+
+def render_bench(bench: pd.DataFrame) -> None:
+    """Render the substitutes underneath the football pitch."""
+    if bench.empty:
+        return
+
+    cards = []
+    for order, (_, player_row) in enumerate(bench.iterrows(), start=1):
+        cards.append(
+            f"""
+            <div class="bench-card">
+                <strong>Bench {order}</strong><br>
+                {html.escape(str(player_row.get('web_name', 'Unknown')))}
+                <div style="margin-top:.25rem;color:#6c7570;font-size:.78rem;">
+                    {html.escape(str(player_row.get('position', '')))}
+                    · {html.escape(str(player_row.get('team_short', '')))}
+                    · {float(player_row.get('suggestion_score', 0)):.1f}
+                </div>
+            </div>
+            """
+        )
+    render_html('<div class="bench-strip">' + "".join(cards) + "</div>")
+
+
+def render_chip_cards(readiness: Dict[str, Dict[str, object]]) -> None:
+    """Render readiness cards for Wildcard, Free Hit, Bench Boost and Triple Captain."""
+    cards = []
+    for chip, details in readiness.items():
+        cards.append(
+            f"""
+            <div class="chip-card">
+                <div class="label">{html.escape(chip)}</div>
+                <div class="value">
+                    {html.escape(str(details.get('level', 'Low')))}
+                    · {float(details.get('score', 0)):.0f}
+                </div>
+                <div style="margin-top:.45rem;color:#6c7570;font-size:.78rem;">
+                    {html.escape(str(details.get('reason', '')))}
+                </div>
+            </div>
+            """
+        )
+    render_html('<div class="chip-grid">' + "".join(cards) + "</div>")
+
+
 st.markdown(
     """
     <div class="hero">
@@ -2043,12 +2551,13 @@ m4.metric(
 )
 
 
-rank_tab, compare_tab, transfer_tab, ai_tab, detail_tab, methodology_tab = st.tabs(
+rank_tab, compare_tab, transfer_tab, ai_tab, team_tab, detail_tab, methodology_tab = st.tabs(
     [
         "Player rankings",
         "Compare players",
         "Transfer planner",
-        "AI Center",
+        "AI Help Center",
+        "Team Center",
         "Player detail",
         "Methodology & data health",
     ]
@@ -2540,14 +3049,75 @@ with transfer_tab:
             value=False,
         )
 
-        min_gain = st.slider(
-            "Minimum score improvement",
-            min_value=-10.0,
-            max_value=20.0,
+        # ------------------------------------------------------------------
+        # REQUIRED MODEL IMPROVEMENT FILTER
+        # ------------------------------------------------------------------
+        # This control compares every replacement candidate with the selected
+        # outgoing player's overall recommendation score.
+        #
+        # Example:
+        #   Current player score = 62
+        #   Required improvement = +5
+        #   Candidate must score at least 67 to appear.
+        #
+        # A very high requirement can legitimately return no players. A negative
+        # value includes sideways or slightly lower-scoring moves, which can be
+        # useful when the manager wants to save money for another transfer.
+        # ------------------------------------------------------------------
+        min_gain = st.select_slider(
+            "How much better must the replacement be?",
+            options=[-10.0, -5.0, 0.0, 2.0, 5.0, 10.0, 15.0, 20.0],
             value=0.0,
-            step=0.5,
-            help="Set below zero to also view sideways or budget-saving moves.",
+            format_func=lambda value: (
+                f"Allow {abs(value):.0f}-point drop"
+                if value < 0
+                else "Any improvement"
+                if value == 0
+                else f"At least +{value:.0f} points"
+            ),
+            help=(
+                "This compares the replacement's overall model score with the "
+                "player you are selling. For example, if your current player "
+                "scores 62 and you choose +5, only replacements scoring 67 or "
+                "higher will be shown. This is a model-score difference, not a "
+                "prediction of extra FPL points."
+            ),
         )
+
+        current_model_score = float(outgoing.get("suggestion_score", 0) or 0)
+        required_candidate_score = current_model_score + float(min_gain)
+
+        if min_gain < 0:
+            filter_explanation = (
+                f"Showing replacements scoring at least "
+                f"{required_candidate_score:.1f}/100. This allows a model drop "
+                f"of up to {abs(min_gain):.0f} points and may reveal cheaper "
+                f"players who free money for another upgrade."
+            )
+        elif min_gain == 0:
+            filter_explanation = (
+                f"Showing only replacements that score higher than "
+                f"{current_model_score:.1f}/100, the current player's model score."
+            )
+        else:
+            filter_explanation = (
+                f"Showing only replacements scoring at least "
+                f"{required_candidate_score:.1f}/100 — {min_gain:.0f} model "
+                f"points above the current player."
+            )
+
+        st.caption(filter_explanation)
+
+        if required_candidate_score > 100:
+            st.warning(
+                "This setting requires a score above 100, so no replacement can "
+                "match it. Lower the required improvement."
+            )
+        elif min_gain >= 15:
+            st.warning(
+                "This is a very strict filter and may return no players. Try "
+                "+5 or +10 for a broader search."
+            )
 
     with control_right:
         st.markdown("### Current player")
@@ -2638,8 +3208,12 @@ with transfer_tab:
 
     if top_candidates.empty:
         st.info(
-            "No player matches the current budget and minimum improvement. "
-            "Increase the bank amount or lower the minimum score improvement."
+            f"No replacement meets all active filters. The current player scores "
+            f"{float(outgoing.get('suggestion_score', 0)):.1f}/100 and the selected "
+            f"setting requires at least "
+            f"{float(outgoing.get('suggestion_score', 0)) + float(min_gain):.1f}/100. "
+            "Lower the required improvement, add more money to the bank, allow "
+            "same-club players, or choose a different transfer priority."
         )
     else:
         first_row = st.columns(min(3, len(top_candidates)))
@@ -2818,24 +3392,24 @@ with transfer_tab:
 
 
 
+
 with ai_tab:
-    st.markdown(
+    render_html(
         """
-        <div class="section-heading">
-            <h2>Phase 3 AI Center</h2>
+        <div class="help-center-banner">
+            <h2>🤖 AI Help Center</h2>
             <p>
-                Explainable recommendations for captaincy, differentials,
-                price momentum and fixture swings. These insights are generated
-                from official FPL data and the model scores already used by the app.
+                Get a detailed player verdict, captain options, low-owned targets,
+                transfer momentum and fixture opportunities from the same
+                explainable model used throughout FPL Scout.
             </p>
         </div>
-        """,
-        unsafe_allow_html=True,
+        """
     )
 
     scout_tab, captain_tab, differential_tab, price_tab, swing_tab = st.tabs(
         [
-            "AI Scout",
+            "Player analysis",
             "Captain picks",
             "Differential finder",
             "Price watch",
@@ -2844,144 +3418,260 @@ with ai_tab:
     )
 
     with scout_tab:
-        st.markdown("### AI Scout verdict")
+        # Use player ID behind the label so players with identical surnames do not
+        # select the wrong row.
+        help_player_lookup = {
+            (
+                f"{row['web_name']} · {row['team_short']} · "
+                f"{row['position']} · £{float(row['price']):.1f}m"
+            ): int(row["player_id"])
+            for _, row in scored.sort_values(
+                ["suggestion_score", "web_name"],
+                ascending=[False, True],
+            ).iterrows()
+        }
 
-        scout_names = (
-            scored.sort_values("suggestion_score", ascending=False)["web_name"]
-            .dropna()
-            .astype(str)
-            .tolist()
+        selected_help_label = st.selectbox(
+            "Choose a player for detailed analysis",
+            options=list(help_player_lookup.keys()),
+            key="ai_help_player",
         )
-        scout_name = st.selectbox(
-            "Choose a player for an AI verdict",
-            scout_names,
-            key="ai_scout_player",
+        selected_help_id = help_player_lookup[selected_help_label]
+        help_player = scored[
+            scored["player_id"] == selected_help_id
+        ].iloc[0]
+
+        verdict = scout_verdict(help_player)
+        photo = safe_image_url(help_player.get("player_photo"))
+        logo = safe_image_url(help_player.get("team_logo"))
+        name = html.escape(str(help_player.get("web_name", "Unknown")))
+        team = html.escape(str(help_player.get("team_name", "Unknown")))
+        position = html.escape(str(help_player.get("position", "")))
+
+        photo_html = (
+            f'<img class="help-player-photo" src="{html.escape(photo)}" alt="{name}">'
+            if photo
+            else '<div class="help-player-placeholder">⚽</div>'
         )
-        scout_player = scored[scored["web_name"] == scout_name].iloc[0]
-        verdict = scout_verdict(scout_player)
+        logo_html = (
+            f'<img class="detail-club-logo" src="{html.escape(logo)}" alt="{team}">'
+            if logo
+            else ""
+        )
 
         render_html(
             f"""
-            <div class="ai-verdict-card">
-                <span class="ai-action">{html.escape(verdict.action)}</span>
-                <h3 style="margin:.7rem 0 .25rem;">
-                    {html.escape(verdict.headline)}
-                </h3>
-                <p>{html.escape(verdict.summary)}</p>
+            <div class="help-player-card">
+                <div>{photo_html}</div>
+                <div>
+                    <span class="ai-action">{html.escape(verdict.action)}</span>
+                    <div style="display:flex;align-items:center;gap:.65rem;margin-top:.65rem;">
+                        {logo_html}
+                        <div>
+                            <div class="help-player-name">{name}</div>
+                            <div class="help-player-meta">
+                                {team} · {position} ·
+                                £{float(help_player.get('price', 0)):.1f}m
+                            </div>
+                        </div>
+                    </div>
 
-                <div class="ai-score-grid">
-                    <div class="ai-mini-score">
-                        <div class="label">AI confidence</div>
-                        <div class="value">{verdict.confidence:.0f}%</div>
-                    </div>
-                    <div class="ai-mini-score">
-                        <div class="label">Overall score</div>
-                        <div class="value">{float(scout_player.get('suggestion_score', 0)):.1f}/100</div>
-                    </div>
-                    <div class="ai-mini-score">
-                        <div class="label">Risk</div>
-                        <div class="value">{float(scout_player.get('risk_score', 0)):.0f}/100</div>
-                    </div>
-                </div>
-
-                <div class="pros-cons">
-                    <div class="pros">
-                        <strong>Model strengths</strong><br>
-                        {'<br>'.join('✓ ' + html.escape(item) for item in verdict.strengths)}
-                    </div>
-                    <div class="cons">
-                        <strong>Risks to monitor</strong><br>
-                        {'<br>'.join('• ' + html.escape(item) for item in verdict.risks)}
+                    <div class="help-stat-grid">
+                        <div class="help-stat">
+                            <div class="k">Overall</div>
+                            <div class="v">{float(help_player.get('suggestion_score', 0)):.1f}</div>
+                        </div>
+                        <div class="help-stat">
+                            <div class="k">AI confidence</div>
+                            <div class="v">{float(help_player.get('ai_confidence', 0)):.0f}%</div>
+                        </div>
+                        <div class="help-stat">
+                            <div class="k">Risk</div>
+                            <div class="v">{float(help_player.get('risk_score', 0)):.0f}/100</div>
+                        </div>
+                        <div class="help-stat">
+                            <div class="k">Ownership</div>
+                            <div class="v">{float(help_player.get('selected_by_percent', 0)):.1f}%</div>
+                        </div>
+                        <div class="help-stat">
+                            <div class="k">Form</div>
+                            <div class="v">{float(help_player.get('form_score', 0)):.1f}</div>
+                        </div>
+                        <div class="help-stat">
+                            <div class="k">Fixtures</div>
+                            <div class="v">{float(help_player.get('fixtures_score', 0)):.1f}</div>
+                        </div>
+                        <div class="help-stat">
+                            <div class="k">Minutes</div>
+                            <div class="v">{float(help_player.get('minutes_score', 0)):.1f}</div>
+                        </div>
+                        <div class="help-stat">
+                            <div class="k">Net transfers</div>
+                            <div class="v">{int(float(help_player.get('net_transfers_event', 0))):+,}</div>
+                        </div>
                     </div>
                 </div>
             </div>
             """
         )
-        st.caption(ai_scout_explanation(scout_player))
 
-    with captain_tab:
-        st.markdown("### Recommended captain options")
-        st.caption(
-            "Captain score emphasizes form, fixtures, secure minutes, team impact "
-            "and availability. It is a 0–100 model indicator."
+        render_html(
+            f"""
+            <div class="decision-callout">
+                <strong>{html.escape(verdict.headline)}</strong><br>
+                {html.escape(verdict.summary)}
+            </div>
+            """
         )
 
+        # Detailed analysis is split into clear football-management questions.
+        attacking_text = (
+            f"Season xG {float(help_player.get('expected_goals', 0)):.1f}, "
+            f"xA {float(help_player.get('expected_assists', 0)):.1f}, and "
+            f"xGI {float(help_player.get('expected_goal_involvements', 0)):.1f}. "
+            f"Recent xGI: {float(help_player.get('recent_xgi', 0)):.2f}."
+        )
+        fixture_text = (
+            f"Average FDR {float(help_player.get('avg_fdr', 0)):.2f}. "
+            f"Next opponents: {str(help_player.get('next_opponents', 'No data')) or 'No data'}."
+        )
+        reliability_text = (
+            f"Minutes score {float(help_player.get('minutes_score', 0)):.1f}/100, "
+            f"availability {float(help_player.get('availability_score', 0)):.1f}/100, "
+            f"official chance {float(help_player.get('chance', 100)):.0f}%."
+        )
+
+        render_html(
+            f"""
+            <div class="help-analysis-grid">
+                <div class="help-analysis-card">
+                    <strong>⚡ Attacking involvement</strong>
+                    <p>{html.escape(attacking_text)}</p>
+                </div>
+                <div class="help-analysis-card">
+                    <strong>📅 Fixture outlook</strong>
+                    <p>{html.escape(fixture_text)}</p>
+                </div>
+                <div class="help-analysis-card">
+                    <strong>⏱ Reliability</strong>
+                    <p>{html.escape(reliability_text)}</p>
+                </div>
+                <div class="help-analysis-card">
+                    <strong>✅ Main strengths</strong>
+                    <p>{html.escape('; '.join(verdict.strengths))}</p>
+                </div>
+                <div class="help-analysis-card">
+                    <strong>⚠️ Risks</strong>
+                    <p>{html.escape('; '.join(verdict.risks))}</p>
+                </div>
+                <div class="help-analysis-card">
+                    <strong>💷 Market context</strong>
+                    <p>
+                        {float(help_player.get('selected_by_percent', 0)):.1f}% owned,
+                        {int(float(help_player.get('net_transfers_event', 0))):+,}
+                        net transfers, value score
+                        {float(help_player.get('value_score', 0)):.1f}/100.
+                    </p>
+                </div>
+            </div>
+            """
+        )
+
+        st.markdown("### Score breakdown")
+        render_colored_breakdown(
+            [
+                ("Recent form", float(help_player.get("form_score", 0))),
+                ("Upcoming fixtures", float(help_player.get("fixtures_score", 0))),
+                ("Playing-time security", float(help_player.get("minutes_score", 0))),
+                ("Availability", float(help_player.get("availability_score", 0))),
+                ("Value", float(help_player.get("value_score", 0))),
+                ("Team impact", float(help_player.get("team_impact_score", 0))),
+            ]
+        )
+
+        if str(help_player.get("news", "")).strip():
+            st.warning(f"Official FPL news: {help_player.get('news')}")
+
+        st.caption(ai_scout_explanation(help_player))
+
+    with captain_tab:
+        st.markdown("### Best captain candidates")
         captain_limit = st.slider(
-            "Number of captain choices",
+            "Number of captain options",
             3,
-            10,
-            5,
+            12,
+            6,
             key="captain_limit",
         )
         captains = captain_picks(scored, captain_limit)
 
-        captain_display = captains[
-            [
-                "web_name",
-                "team_short",
-                "position",
-                "price",
-                "captain_score",
-                "form_score",
-                "fixtures_score",
-                "minutes_score",
-                "availability_score",
-                "selected_by_percent",
-                "next_opponents",
-            ]
-        ].rename(
-            columns={
-                "web_name": "Player",
-                "team_short": "Team",
-                "position": "Pos",
-                "price": "Price",
-                "captain_score": "Captain score",
-                "form_score": "Form",
-                "fixtures_score": "Fixtures",
-                "minutes_score": "Minutes",
-                "availability_score": "Availability",
-                "selected_by_percent": "Ownership %",
-                "next_opponents": "Next fixtures",
-            }
-        )
-
-        st.dataframe(
-            captain_display,
-            hide_index=True,
-            use_container_width=True,
-            column_config={
-                "Price": st.column_config.NumberColumn(format="£%.1fm"),
-                "Captain score": st.column_config.ProgressColumn(
-                    min_value=0, max_value=100, format="%.1f"
-                ),
-                "Form": st.column_config.ProgressColumn(
-                    min_value=0, max_value=100, format="%.1f"
-                ),
-                "Fixtures": st.column_config.ProgressColumn(
-                    min_value=0, max_value=100, format="%.1f"
-                ),
-                "Minutes": st.column_config.ProgressColumn(
-                    min_value=0, max_value=100, format="%.1f"
-                ),
-                "Availability": st.column_config.ProgressColumn(
-                    min_value=0, max_value=100, format="%.1f"
-                ),
-                "Ownership %": st.column_config.NumberColumn(format="%.1f%%"),
-            },
-        )
+        if captains.empty:
+            st.info("No captain candidate is available with the current data.")
+        else:
+            captain_display = captains[
+                [
+                    "player_photo",
+                    "web_name",
+                    "team_short",
+                    "position",
+                    "price",
+                    "captain_score",
+                    "ai_confidence",
+                    "form_score",
+                    "fixtures_score",
+                    "minutes_score",
+                    "availability_score",
+                    "selected_by_percent",
+                    "next_opponents",
+                ]
+            ].rename(
+                columns={
+                    "player_photo": "Photo",
+                    "web_name": "Player",
+                    "team_short": "Team",
+                    "position": "Pos",
+                    "price": "Price",
+                    "captain_score": "Captain score",
+                    "ai_confidence": "Confidence",
+                    "form_score": "Form",
+                    "fixtures_score": "Fixtures",
+                    "minutes_score": "Minutes",
+                    "availability_score": "Availability",
+                    "selected_by_percent": "Ownership %",
+                    "next_opponents": "Next fixtures",
+                }
+            )
+            st.dataframe(
+                captain_display,
+                hide_index=True,
+                use_container_width=True,
+                column_config={
+                    "Photo": st.column_config.ImageColumn(width="small"),
+                    "Price": st.column_config.NumberColumn(format="£%.1fm"),
+                    "Captain score": st.column_config.ProgressColumn(min_value=0, max_value=100, format="%.1f"),
+                    "Confidence": st.column_config.ProgressColumn(min_value=0, max_value=100, format="%.0f%%"),
+                    "Form": st.column_config.ProgressColumn(min_value=0, max_value=100, format="%.1f"),
+                    "Fixtures": st.column_config.ProgressColumn(min_value=0, max_value=100, format="%.1f"),
+                    "Minutes": st.column_config.ProgressColumn(min_value=0, max_value=100, format="%.1f"),
+                    "Availability": st.column_config.ProgressColumn(min_value=0, max_value=100, format="%.1f"),
+                    "Ownership %": st.column_config.NumberColumn(format="%.1f%%"),
+                    "Next fixtures": st.column_config.TextColumn(width="large"),
+                },
+            )
 
     with differential_tab:
-        st.markdown("### Differential finder")
-        ownership_limit = st.slider(
+        st.markdown("### Low-owned player finder")
+        d1, d2 = st.columns(2)
+        ownership_limit = d1.slider(
             "Maximum ownership",
             1.0,
-            20.0,
+            25.0,
             10.0,
             0.5,
             key="differential_ownership",
         )
-        differential_limit = st.slider(
-            "Number of players",
+        differential_limit = d2.slider(
+            "Number of results",
             5,
             20,
             10,
@@ -2994,165 +3684,510 @@ with ai_tab:
             limit=differential_limit,
         )
 
-        differential_display = differentials[
-            [
-                "web_name",
-                "team_short",
-                "position",
-                "price",
-                "selected_by_percent",
-                "differential_score",
-                "suggestion_score",
-                "form_score",
-                "fixtures_score",
-                "net_transfers_event",
-                "next_opponents",
-            ]
-        ].rename(
-            columns={
-                "web_name": "Player",
-                "team_short": "Team",
-                "position": "Pos",
-                "price": "Price",
-                "selected_by_percent": "Ownership %",
-                "differential_score": "Differential score",
-                "suggestion_score": "Overall score",
-                "form_score": "Form",
-                "fixtures_score": "Fixtures",
-                "net_transfers_event": "Net transfers",
-                "next_opponents": "Next fixtures",
-            }
-        )
-
-        st.dataframe(
-            differential_display,
-            hide_index=True,
-            use_container_width=True,
-            column_config={
-                "Price": st.column_config.NumberColumn(format="£%.1fm"),
-                "Ownership %": st.column_config.NumberColumn(format="%.1f%%"),
-                "Differential score": st.column_config.ProgressColumn(
-                    min_value=0, max_value=100, format="%.1f"
-                ),
-                "Overall score": st.column_config.ProgressColumn(
-                    min_value=0, max_value=100, format="%.1f"
-                ),
-                "Form": st.column_config.ProgressColumn(
-                    min_value=0, max_value=100, format="%.1f"
-                ),
-                "Fixtures": st.column_config.ProgressColumn(
-                    min_value=0, max_value=100, format="%.1f"
-                ),
-                "Net transfers": st.column_config.NumberColumn(format="%+d"),
-            },
-        )
+        if differentials.empty:
+            st.info(
+                "No player is below the selected ownership limit. "
+                "Increase the ownership slider."
+            )
+        else:
+            differential_display = differentials[
+                [
+                    "player_photo",
+                    "web_name",
+                    "team_short",
+                    "position",
+                    "price",
+                    "selected_by_percent",
+                    "differential_score",
+                    "suggestion_score",
+                    "ai_confidence",
+                    "form_score",
+                    "fixtures_score",
+                    "availability_score",
+                    "net_transfers_event",
+                    "next_opponents",
+                ]
+            ].rename(
+                columns={
+                    "player_photo": "Photo",
+                    "web_name": "Player",
+                    "team_short": "Team",
+                    "position": "Pos",
+                    "price": "Price",
+                    "selected_by_percent": "Ownership %",
+                    "differential_score": "Differential score",
+                    "suggestion_score": "Overall",
+                    "ai_confidence": "Confidence",
+                    "form_score": "Form",
+                    "fixtures_score": "Fixtures",
+                    "availability_score": "Availability",
+                    "net_transfers_event": "Net transfers",
+                    "next_opponents": "Next fixtures",
+                }
+            )
+            st.dataframe(
+                differential_display,
+                hide_index=True,
+                use_container_width=True,
+                column_config={
+                    "Photo": st.column_config.ImageColumn(width="small"),
+                    "Price": st.column_config.NumberColumn(format="£%.1fm"),
+                    "Ownership %": st.column_config.NumberColumn(format="%.1f%%"),
+                    "Differential score": st.column_config.ProgressColumn(min_value=0, max_value=100, format="%.1f"),
+                    "Overall": st.column_config.ProgressColumn(min_value=0, max_value=100, format="%.1f"),
+                    "Confidence": st.column_config.ProgressColumn(min_value=0, max_value=100, format="%.0f%%"),
+                    "Form": st.column_config.ProgressColumn(min_value=0, max_value=100, format="%.1f"),
+                    "Fixtures": st.column_config.ProgressColumn(min_value=0, max_value=100, format="%.1f"),
+                    "Availability": st.column_config.ProgressColumn(min_value=0, max_value=100, format="%.1f"),
+                    "Net transfers": st.column_config.NumberColumn(format="%+d"),
+                    "Next fixtures": st.column_config.TextColumn(width="large"),
+                },
+            )
 
     with price_tab:
-        st.markdown("### Price-rise pressure watch")
+        st.markdown("### Transfer and price pressure")
         st.caption(
-            "This is an estimated pressure indicator based on relative transfer "
-            "momentum, form and value. It is not an official price-change prediction."
+            "This is a relative market-pressure indicator. It is not the "
+            "unpublished official FPL price-change algorithm."
         )
 
-        rising = price_watch(scored, 12)
-        price_display = rising[
-            [
-                "web_name",
-                "team_short",
-                "price",
-                "price_momentum_score",
-                "transfers_in_event",
-                "transfers_out_event",
-                "net_transfers_event",
-                "selected_by_percent",
-                "form_score",
-            ]
-        ].rename(
-            columns={
-                "web_name": "Player",
-                "team_short": "Team",
-                "price": "Price",
-                "price_momentum_score": "Momentum score",
-                "transfers_in_event": "Transfers in",
-                "transfers_out_event": "Transfers out",
-                "net_transfers_event": "Net transfers",
-                "selected_by_percent": "Ownership %",
-                "form_score": "Form",
-            }
-        )
-        st.dataframe(
-            price_display,
-            hide_index=True,
-            use_container_width=True,
-            column_config={
-                "Price": st.column_config.NumberColumn(format="£%.1fm"),
-                "Momentum score": st.column_config.ProgressColumn(
-                    min_value=0, max_value=100, format="%.1f"
-                ),
-                "Net transfers": st.column_config.NumberColumn(format="%+d"),
-                "Ownership %": st.column_config.NumberColumn(format="%.1f%%"),
-                "Form": st.column_config.ProgressColumn(
-                    min_value=0, max_value=100, format="%.1f"
-                ),
-            },
-        )
+        rising = price_watch(scored, 15)
+
+        if rising.empty:
+            st.info("No current transfer-momentum data is available.")
+        else:
+            price_display = rising[
+                [
+                    "player_photo",
+                    "web_name",
+                    "team_short",
+                    "price",
+                    "price_momentum_score",
+                    "transfers_in_event",
+                    "transfers_out_event",
+                    "net_transfers_event",
+                    "selected_by_percent",
+                    "form_score",
+                    "availability_score",
+                ]
+            ].rename(
+                columns={
+                    "player_photo": "Photo",
+                    "web_name": "Player",
+                    "team_short": "Team",
+                    "price": "Price",
+                    "price_momentum_score": "Momentum",
+                    "transfers_in_event": "Transfers in",
+                    "transfers_out_event": "Transfers out",
+                    "net_transfers_event": "Net transfers",
+                    "selected_by_percent": "Ownership %",
+                    "form_score": "Form",
+                    "availability_score": "Availability",
+                }
+            )
+            st.dataframe(
+                price_display,
+                hide_index=True,
+                use_container_width=True,
+                column_config={
+                    "Photo": st.column_config.ImageColumn(width="small"),
+                    "Price": st.column_config.NumberColumn(format="£%.1fm"),
+                    "Momentum": st.column_config.ProgressColumn(min_value=0, max_value=100, format="%.1f"),
+                    "Net transfers": st.column_config.NumberColumn(format="%+d"),
+                    "Ownership %": st.column_config.NumberColumn(format="%.1f%%"),
+                    "Form": st.column_config.ProgressColumn(min_value=0, max_value=100, format="%.1f"),
+                    "Availability": st.column_config.ProgressColumn(min_value=0, max_value=100, format="%.1f"),
+                },
+            )
 
     with swing_tab:
-        st.markdown("### Fixture swing analyzer")
+        st.markdown("### Future fixture swings")
         st.caption(
-            "Highlights players whose upcoming schedule, team strength and "
-            "current form create an attractive near-term opportunity."
+            "Ranks players whose fixture schedule, club strength and current "
+            "form create a strong near-term opportunity."
         )
 
-        swing = fixture_swing_picks(scored, 15)
-        swing_display = swing[
-            [
-                "web_name",
-                "team_short",
-                "position",
-                "price",
-                "fixture_swing_score",
-                "fixtures_score",
-                "avg_fdr",
-                "form_score",
-                "team_impact_score",
-                "next_opponents",
-            ]
-        ].rename(
-            columns={
-                "web_name": "Player",
-                "team_short": "Team",
-                "position": "Pos",
-                "price": "Price",
-                "fixture_swing_score": "Swing score",
-                "fixtures_score": "Fixtures",
-                "avg_fdr": "Avg FDR",
-                "form_score": "Form",
-                "team_impact_score": "Team impact",
-                "next_opponents": "Next fixtures",
-            }
+        swing_limit = st.slider(
+            "Number of fixture opportunities",
+            5,
+            20,
+            12,
+            key="fixture_swing_limit",
         )
-        st.dataframe(
-            swing_display,
-            hide_index=True,
+        swing = fixture_swing_picks(scored, swing_limit)
+
+        if swing.empty:
+            st.info("No upcoming fixture data is currently available.")
+        else:
+            swing_display = swing[
+                [
+                    "player_photo",
+                    "web_name",
+                    "team_short",
+                    "position",
+                    "price",
+                    "fixture_swing_score",
+                    "fixtures_score",
+                    "avg_fdr",
+                    "form_score",
+                    "minutes_score",
+                    "availability_score",
+                    "team_impact_score",
+                    "next_opponents",
+                ]
+            ].rename(
+                columns={
+                    "player_photo": "Photo",
+                    "web_name": "Player",
+                    "team_short": "Team",
+                    "position": "Pos",
+                    "price": "Price",
+                    "fixture_swing_score": "Swing score",
+                    "fixtures_score": "Fixtures",
+                    "avg_fdr": "Avg FDR",
+                    "form_score": "Form",
+                    "minutes_score": "Minutes",
+                    "availability_score": "Availability",
+                    "team_impact_score": "Team impact",
+                    "next_opponents": "Next fixtures",
+                }
+            )
+            st.dataframe(
+                swing_display,
+                hide_index=True,
+                use_container_width=True,
+                column_config={
+                    "Photo": st.column_config.ImageColumn(width="small"),
+                    "Price": st.column_config.NumberColumn(format="£%.1fm"),
+                    "Swing score": st.column_config.ProgressColumn(min_value=0, max_value=100, format="%.1f"),
+                    "Fixtures": st.column_config.ProgressColumn(min_value=0, max_value=100, format="%.1f"),
+                    "Avg FDR": st.column_config.NumberColumn(format="%.2f"),
+                    "Form": st.column_config.ProgressColumn(min_value=0, max_value=100, format="%.1f"),
+                    "Minutes": st.column_config.ProgressColumn(min_value=0, max_value=100, format="%.1f"),
+                    "Availability": st.column_config.ProgressColumn(min_value=0, max_value=100, format="%.1f"),
+                    "Team impact": st.column_config.ProgressColumn(min_value=0, max_value=100, format="%.1f"),
+                    "Next fixtures": st.column_config.TextColumn(width="large"),
+                },
+            )
+
+
+with team_tab:
+    render_html(
+        """
+        <div class="team-center-banner">
+            <h2>⚽ Phase 4 Team Center</h2>
+            <p>
+                Select a full squad, validate FPL rules, generate your best XI,
+                build a wildcard and review coordinated transfer plans.
+            </p>
+        </div>
+        """
+    )
+
+    squad_tab, xi_tab, wildcard_tab, pair_tab, calendar_tab, chip_tab = st.tabs(
+        [
+            "Squad analyzer",
+            "Best XI",
+            "Wildcard builder",
+            "Two-transfer optimizer",
+            "Fixture calendar",
+            "Chip readiness",
+        ]
+    )
+
+    selector_lookup = player_selector_labels(scored)
+    selector_options = list(selector_lookup.keys())
+
+    if "phase4_squad_ids" not in st.session_state:
+        starter_squad, _ = build_wildcard_squad(
+            scored,
+            budget=100.0,
+            strategy="Balanced",
+        )
+        st.session_state.phase4_squad_ids = (
+            starter_squad["player_id"].astype(int).tolist()
+            if len(starter_squad) == 15
+            else []
+        )
+
+    default_squad_labels = [
+        label
+        for label, player_id in selector_lookup.items()
+        if player_id in set(st.session_state.phase4_squad_ids)
+    ]
+
+    with squad_tab:
+        st.markdown("### Build and validate your squad")
+
+        squad_budget = st.number_input(
+            "Squad budget (£m)",
+            min_value=80.0,
+            max_value=110.0,
+            value=100.0,
+            step=0.1,
+            key="phase4_squad_budget",
+        )
+
+        selected_labels = st.multiselect(
+            "Select 15 players",
+            options=selector_options,
+            default=default_squad_labels,
+            max_selections=15,
+            key="phase4_squad_selector",
+            help="Select 2 GK, 5 DEF, 5 MID and 3 FWD.",
+        )
+
+        selected_ids = [selector_lookup[label] for label in selected_labels]
+        st.session_state.phase4_squad_ids = selected_ids
+
+        active_squad = scored[scored["player_id"].isin(selected_ids)].copy()
+        validation = validate_squad(
+            active_squad,
+            budget=float(squad_budget),
+            require_complete_squad=True,
+        )
+
+        for message in validation.errors:
+            st.error(message)
+        for message in validation.warnings:
+            st.warning(message)
+
+        if validation.is_valid:
+            st.success("This squad satisfies the main FPL squad rules.")
+
+        if not active_squad.empty:
+            ratings = rate_squad(active_squad)
+            render_squad_score_cards(ratings)
+
+            render_html(
+                f"""
+                <div class="team-note">
+                    <strong>Squad verdict:</strong>
+                    {html.escape(squad_summary(ratings))}
+                </div>
+                """
+            )
+
+            squad_display = active_squad[
+                [
+                    "web_name",
+                    "team_short",
+                    "position",
+                    "price",
+                    "suggestion_score",
+                    "captain_score",
+                    "fixtures_score",
+                    "availability_score",
+                    "risk_score",
+                ]
+            ].rename(
+                columns={
+                    "web_name": "Player",
+                    "team_short": "Team",
+                    "position": "Pos",
+                    "price": "Price",
+                    "suggestion_score": "Overall",
+                    "captain_score": "Captain",
+                    "fixtures_score": "Fixtures",
+                    "availability_score": "Availability",
+                    "risk_score": "Risk",
+                }
+            )
+
+            st.dataframe(
+                squad_display,
+                hide_index=True,
+                use_container_width=True,
+            )
+
+            st.markdown("### Budget allocation")
+            budget_table = analyze_budget(active_squad, float(squad_budget))
+            st.dataframe(
+                budget_table,
+                hide_index=True,
+                use_container_width=True,
+            )
+
+            for warning in budget_warnings(budget_table):
+                st.write(f"• {warning}")
+
+    active_squad = scored[
+        scored["player_id"].isin(st.session_state.phase4_squad_ids)
+    ].copy()
+
+    with xi_tab:
+        st.markdown("### Best legal starting XI")
+
+        if len(active_squad) != 15:
+            st.info("Select a complete 15-player squad in Squad Analyzer first.")
+        else:
+            starters, bench, formation = select_best_starting_xi(active_squad)
+            render_pitch(starters, formation)
+            st.markdown("#### Bench")
+            render_bench(bench)
+
+            captain, vice = choose_captains(starters)
+            if captain is not None:
+                left, right = st.columns(2)
+                left.metric(
+                    "Captain",
+                    str(captain.get("web_name", "Unknown")),
+                    delta=f"{float(captain.get('captain_score', 0)):.1f} captain score",
+                )
+                right.metric(
+                    "Vice-captain",
+                    str(vice.get("web_name", "Unknown")) if vice is not None else "N/A",
+                    delta=(
+                        f"{float(vice.get('captain_score', 0)):.1f} captain score"
+                        if vice is not None
+                        else None
+                    ),
+                )
+
+            render_html(
+                f"""
+                <div class="team-note">
+                    {html.escape(starting_xi_summary(starters, bench, formation))}
+                </div>
+                """
+            )
+
+    with wildcard_tab:
+        st.markdown("### Wildcard squad builder")
+
+        wc1, wc2 = st.columns(2)
+        wildcard_budget = wc1.number_input(
+            "Wildcard budget (£m)",
+            min_value=80.0,
+            max_value=110.0,
+            value=100.0,
+            step=0.1,
+            key="wildcard_budget",
+        )
+        wildcard_strategy = wc2.selectbox(
+            "Strategy",
+            ["Balanced", "Form", "Fixtures", "Value", "Safe"],
+            key="wildcard_strategy",
+        )
+
+        if st.button(
+            "Build wildcard squad",
             use_container_width=True,
-            column_config={
-                "Price": st.column_config.NumberColumn(format="£%.1fm"),
-                "Swing score": st.column_config.ProgressColumn(
-                    min_value=0, max_value=100, format="%.1f"
-                ),
-                "Fixtures": st.column_config.ProgressColumn(
-                    min_value=0, max_value=100, format="%.1f"
-                ),
-                "Avg FDR": st.column_config.NumberColumn(format="%.2f"),
-                "Form": st.column_config.ProgressColumn(
-                    min_value=0, max_value=100, format="%.1f"
-                ),
-                "Team impact": st.column_config.ProgressColumn(
-                    min_value=0, max_value=100, format="%.1f"
-                ),
-            },
-        )
+            key="build_wildcard",
+        ):
+            generated, notes = build_wildcard_squad(
+                scored,
+                budget=float(wildcard_budget),
+                strategy=wildcard_strategy,
+            )
+            st.session_state.phase4_wildcard = generated
+            st.session_state.phase4_wildcard_notes = notes
+
+        generated = st.session_state.get("phase4_wildcard", pd.DataFrame())
+        notes = st.session_state.get("phase4_wildcard_notes", [])
+
+        if not generated.empty:
+            render_html(
+                f"""
+                <div class="team-note">
+                    {html.escape(wildcard_summary(
+                        generated,
+                        notes,
+                        float(wildcard_budget),
+                    ))}
+                </div>
+                """
+            )
+
+            wc_starters, wc_bench, wc_formation = select_best_starting_xi(generated)
+            render_pitch(wc_starters, wc_formation)
+            render_bench(wc_bench)
+
+            st.dataframe(
+                generated[
+                    [
+                        "web_name",
+                        "team_short",
+                        "position",
+                        "price",
+                        "suggestion_score",
+                        "captain_score",
+                        "value_score",
+                    ]
+                ],
+                hide_index=True,
+                use_container_width=True,
+            )
+
+    with pair_tab:
+        st.markdown("### Coordinated two-player transfers")
+
+        if len(active_squad) != 15:
+            st.info("Select a complete squad first.")
+        else:
+            transfer_bank = st.number_input(
+                "Money in bank (£m)",
+                min_value=0.0,
+                max_value=20.0,
+                value=0.0,
+                step=0.1,
+                key="phase4_pair_bank",
+            )
+
+            st.caption(
+                "Pair optimization checks many combinations, so it runs only "
+                "when requested. This keeps the rest of the app responsive."
+            )
+
+            if st.button(
+                "Run two-transfer optimizer",
+                key="run_pair_optimizer",
+                use_container_width=True,
+            ):
+                with st.spinner("Checking coordinated transfer combinations..."):
+                    st.session_state.phase4_pair_results = optimize_two_transfers(
+                        active_squad,
+                        scored,
+                        bank=float(transfer_bank),
+                        limit=12,
+                    )
+
+            pair_results = st.session_state.get(
+                "phase4_pair_results",
+                pd.DataFrame(),
+            )
+
+            if pair_results.empty:
+                st.info(
+                    "Press the button to calculate transfer pairs, or no "
+                    "positive pair has been found yet."
+                )
+            else:
+                st.dataframe(
+                    pair_results,
+                    hide_index=True,
+                    use_container_width=True,
+                )
+
+    with calendar_tab:
+        st.markdown("### Squad fixture calendar")
+
+        if active_squad.empty:
+            st.info("Select a squad first.")
+        else:
+            st.dataframe(
+                fixture_matrix(active_squad, horizon=horizon),
+                hide_index=True,
+                use_container_width=True,
+            )
+
+    with chip_tab:
+        st.markdown("### Chip readiness")
+
+        if len(active_squad) != 15:
+            st.info("Select a complete squad first.")
+        else:
+            render_chip_cards(chip_readiness(active_squad))
 
 
 with detail_tab:
