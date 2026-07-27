@@ -252,128 +252,216 @@ def optimize_two_transfers(
     player_pool: pd.DataFrame,
     bank: float = 0.0,
     limit: int = 10,
-    candidate_limit_per_position: int = 18,
+    candidate_limit_per_position: int = 10,
 ) -> pd.DataFrame:
+    """Return the best legal coordinated two-transfer plans.
+
+    This implementation avoids repeatedly constructing and validating complete
+    DataFrames inside the deepest loop. It pre-builds small position-specific
+    candidate pools, checks prices and club limits using dictionaries, and only
+    creates a final DataFrame after the search is complete.
+
+    The result is a fast, explainable heuristic suitable for Streamlit.
     """
-    Search for coordinated two-player transfer combinations.
 
-    Why pair optimization matters
-    -----------------------------
-    A one-player transfer cannot identify moves where a cheap downgrade funds a
-    major upgrade elsewhere. This function evaluates pairs while respecting:
+    result_columns = [
+        "Transfer out 1",
+        "Transfer out 2",
+        "Transfer in 1",
+        "Transfer in 2",
+        "Position 1",
+        "Position 2",
+        "Outgoing cost",
+        "Incoming cost",
+        "Money remaining",
+        "Combined score gain",
+        "Incoming average score",
+    ]
 
-    * Total available budget.
-    * Position-for-position replacement.
-    * Maximum three players from one club.
-    * No duplicate incoming players.
+    if len(squad) != 15 or player_pool.empty:
+        return pd.DataFrame(columns=result_columns)
 
-    Performance protection
-    ----------------------
-    Evaluating every possible FPL player pair would be expensive. Therefore the
-    incoming pool is reduced to the top candidates for each position before
-    combinations are generated.
-    """
-    if len(squad) < 2 or player_pool.empty:
-        return pd.DataFrame()
+    required_columns = {
+        "player_id",
+        "web_name",
+        "position",
+        "team",
+        "price",
+        "suggestion_score",
+    }
+    if not required_columns.issubset(squad.columns):
+        return pd.DataFrame(columns=result_columns)
+    if not required_columns.issubset(player_pool.columns):
+        return pd.DataFrame(columns=result_columns)
 
-    squad_ids = set(squad["player_id"].astype(int))
-    outsiders = player_pool[~player_pool["player_id"].astype(int).isin(squad_ids)].copy()
+    squad_frame = squad.copy()
+    pool_frame = player_pool.copy()
 
-    # Keep the most useful incoming candidates for each position.
-    reduced_parts = []
+    numeric_columns = [
+        "player_id",
+        "team",
+        "price",
+        "suggestion_score",
+        "value_score",
+        "availability_score",
+    ]
+    for column in numeric_columns:
+        if column not in squad_frame.columns:
+            squad_frame[column] = 0.0
+        if column not in pool_frame.columns:
+            pool_frame[column] = 0.0
+        squad_frame[column] = pd.to_numeric(
+            squad_frame[column], errors="coerce"
+        ).fillna(0.0)
+        pool_frame[column] = pd.to_numeric(
+            pool_frame[column], errors="coerce"
+        ).fillna(0.0)
+
+    squad_ids = set(squad_frame["player_id"].astype(int))
+    outsiders = pool_frame[
+        ~pool_frame["player_id"].astype(int).isin(squad_ids)
+    ].copy()
+
+    # Exclude clearly unusable candidates before creating position pools.
+    if "availability_score" in outsiders.columns:
+        outsiders = outsiders[outsiders["availability_score"] >= 35].copy()
+    outsiders = outsiders[outsiders["price"] > 0].copy()
+
+    # A balanced optimization score prevents the search from selecting a player
+    # solely because of one unusually high input.
+    outsiders["_pair_score"] = (
+        0.70 * outsiders["suggestion_score"]
+        + 0.18 * outsiders.get("value_score", 0.0)
+        + 0.12 * outsiders.get("availability_score", 0.0)
+    )
+
+    candidate_pools: Dict[str, List[Dict[str, object]]] = {}
     for position in REQUIRED_POSITION_COUNTS:
-        reduced = outsiders[outsiders["position"] == position].sort_values(
-            ["suggestion_score", "value_score", "availability_score"],
-            ascending=False,
-        ).head(candidate_limit_per_position)
-        reduced_parts.append(reduced)
-    outsiders = pd.concat(reduced_parts, ignore_index=True)
+        position_pool = outsiders[
+            outsiders["position"] == position
+        ].sort_values(
+            ["_pair_score", "suggestion_score", "price"],
+            ascending=[False, False, True],
+        ).head(max(4, int(candidate_limit_per_position)))
 
+        candidate_pools[position] = position_pool.to_dict("records")
+
+    base_club_counts = (
+        squad_frame["team"].astype(int).value_counts().to_dict()
+    )
+
+    outgoing_records = squad_frame.to_dict("records")
     results: List[Dict[str, object]] = []
-    current_cost = float(_numeric(squad["price"]).sum())
 
-    for (_, outgoing_a), (_, outgoing_b) in combinations(squad.iterrows(), 2):
-        outgoing_positions = sorted([str(outgoing_a["position"]), str(outgoing_b["position"])])
-        outgoing_price = float(outgoing_a["price"]) + float(outgoing_b["price"])
-        outgoing_score = float(outgoing_a["suggestion_score"]) + float(outgoing_b["suggestion_score"])
-        pair_budget = outgoing_price + bank
+    for outgoing_a, outgoing_b in combinations(outgoing_records, 2):
+        position_a = str(outgoing_a["position"])
+        position_b = str(outgoing_b["position"])
 
-        candidate_rows = outsiders[
-            outsiders["position"].isin(outgoing_positions)
-        ]
+        incoming_pool_a = candidate_pools.get(position_a, [])
+        incoming_pool_b = candidate_pools.get(position_b, [])
+        if not incoming_pool_a or not incoming_pool_b:
+            continue
 
-        for (_, incoming_a), (_, incoming_b) in combinations(candidate_rows.iterrows(), 2):
-            if int(incoming_a["player_id"]) == int(incoming_b["player_id"]):
-                continue
+        outgoing_cost = float(outgoing_a["price"]) + float(outgoing_b["price"])
+        maximum_incoming_cost = outgoing_cost + float(bank)
+        outgoing_score = (
+            float(outgoing_a["suggestion_score"])
+            + float(outgoing_b["suggestion_score"])
+        )
 
-            incoming_positions = sorted([str(incoming_a["position"]), str(incoming_b["position"])])
-            if incoming_positions != outgoing_positions:
-                continue
+        # Remove the outgoing players from the club-count baseline once per pair.
+        club_counts = dict(base_club_counts)
+        for outgoing in (outgoing_a, outgoing_b):
+            team_id = int(outgoing["team"])
+            club_counts[team_id] = max(0, club_counts.get(team_id, 0) - 1)
 
-            incoming_price = float(incoming_a["price"]) + float(incoming_b["price"])
-            if incoming_price > pair_budget + 1e-9:
-                continue
-
-            proposed = squad[
-                ~squad["player_id"].isin(
-                    [outgoing_a["player_id"], outgoing_b["player_id"]]
-                )
-            ].copy()
-            proposed = pd.concat(
-                [
-                    proposed,
-                    incoming_a.to_frame().T,
-                    incoming_b.to_frame().T,
-                ],
-                ignore_index=True,
+        # For two different positions, every player in pool A can pair with every
+        # player in pool B. For equal positions, combinations avoid duplicate and
+        # reversed candidate pairs.
+        if position_a == position_b:
+            incoming_pairs = combinations(incoming_pool_a, 2)
+        else:
+            incoming_pairs = (
+                (incoming_a, incoming_b)
+                for incoming_a in incoming_pool_a
+                for incoming_b in incoming_pool_b
             )
 
-            if proposed["team"].value_counts().max() > 3:
+        for incoming_a, incoming_b in incoming_pairs:
+            incoming_a_id = int(incoming_a["player_id"])
+            incoming_b_id = int(incoming_b["player_id"])
+            if incoming_a_id == incoming_b_id:
                 continue
 
-            gain = (
+            incoming_cost = (
+                float(incoming_a["price"]) + float(incoming_b["price"])
+            )
+            if incoming_cost > maximum_incoming_cost + 1e-9:
+                continue
+
+            team_a = int(incoming_a["team"])
+            team_b = int(incoming_b["team"])
+
+            # Fast maximum-three-per-club validation.
+            if team_a == team_b:
+                if club_counts.get(team_a, 0) + 2 > 3:
+                    continue
+            else:
+                if club_counts.get(team_a, 0) + 1 > 3:
+                    continue
+                if club_counts.get(team_b, 0) + 1 > 3:
+                    continue
+
+            incoming_score = (
                 float(incoming_a["suggestion_score"])
                 + float(incoming_b["suggestion_score"])
-                - outgoing_score
             )
-
-            if gain <= 0:
+            score_gain = incoming_score - outgoing_score
+            if score_gain <= 0:
                 continue
 
             results.append(
                 {
-                    "Transfer out 1": outgoing_a["web_name"],
-                    "Transfer out 2": outgoing_b["web_name"],
-                    "Transfer in 1": incoming_a["web_name"],
-                    "Transfer in 2": incoming_b["web_name"],
-                    "Outgoing cost": outgoing_price,
-                    "Incoming cost": incoming_price,
-                    "Money left": pair_budget - incoming_price,
-                    "Combined score gain": gain,
-                    "Incoming fixtures": (
-                        f"{incoming_a.get('next_opponents', '')} | "
-                        f"{incoming_b.get('next_opponents', '')}"
+                    "Transfer out 1": str(outgoing_a["web_name"]),
+                    "Transfer out 2": str(outgoing_b["web_name"]),
+                    "Transfer in 1": str(incoming_a["web_name"]),
+                    "Transfer in 2": str(incoming_b["web_name"]),
+                    "Position 1": position_a,
+                    "Position 2": position_b,
+                    "Outgoing cost": round(outgoing_cost, 1),
+                    "Incoming cost": round(incoming_cost, 1),
+                    "Money remaining": round(
+                        maximum_incoming_cost - incoming_cost, 1
                     ),
+                    "Combined score gain": round(score_gain, 2),
+                    "Incoming average score": round(incoming_score / 2.0, 2),
                 }
             )
 
     if not results:
-        return pd.DataFrame()
+        return pd.DataFrame(columns=result_columns)
 
-    return (
-        pd.DataFrame(results)
-        .sort_values(
-            ["Combined score gain", "Money left"],
-            ascending=[False, False],
+    results_frame = pd.DataFrame(results)
+
+    # Remove duplicate plans where the same four players appear in a reversed
+    # display order.
+    results_frame["_plan_key"] = results_frame.apply(
+        lambda row: (
+            tuple(sorted([row["Transfer out 1"], row["Transfer out 2"]])),
+            tuple(sorted([row["Transfer in 1"], row["Transfer in 2"]])),
+        ),
+        axis=1,
+    )
+    results_frame = (
+        results_frame.sort_values(
+            ["Combined score gain", "Money remaining", "Incoming average score"],
+            ascending=[False, False, False],
         )
-        .drop_duplicates(
-            subset=[
-                "Transfer out 1",
-                "Transfer out 2",
-                "Transfer in 1",
-                "Transfer in 2",
-            ]
-        )
-        .head(limit)
+        .drop_duplicates("_plan_key")
+        .head(max(1, int(limit)))
+        .drop(columns="_plan_key")
         .reset_index(drop=True)
     )
+
+    return results_frame[result_columns]
+
